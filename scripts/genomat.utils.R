@@ -80,3 +80,32 @@ fill_d_zero = function(W,h,r=1) {
   }
   return(d)
 }
+
+#TDOD
+#don't leave this as stupid for loops
+R_sq_hap <- function(r,f,allele_freq,GENO_MAT,GENO_PAT,N){
+  
+  r_sq_hap <- rep(0,r*(r-1)/2)
+  for ( K in 1:(r-1)){
+    for( L in (K+1):r){
+      r_sq_KL <- 0
+      for (i in 1:f){
+        pA_i <- allele_freq[f*(K-1)+i]
+        if( pA_i == 0){next}
+        for (j in 1:f){
+          pB_j <- allele_freq[f*(L-1)+j]
+          if( pB_j == 0){next}
+          pAB_ij <- (sum(rowSums(GENO_MAT[,c(f*(K-1)+i,f*(L-1)+j)])==2) +  
+                       sum(rowSums(GENO_PAT[,c(f*(K-1)+i,f*(L-1)+j)])==2))/(2*N)
+          
+          D_KL_ij <- pAB_ij - (pA_i*pB_j)
+          r_sq_KL_ij <- (D_KL_ij^2)/(pA_i*(1-pA_i)*pB_j*(1-pB_j))
+          
+          r_sq_KL <- r_sq_KL + r_sq_KL_ij*pAB_ij
+        }
+      }
+      r_sq_hap[choose(r,2)-choose(r-K+1,2)+L-K] <- r_sq_KL
+    }
+  }
+  return(r_sq_hap)
+}

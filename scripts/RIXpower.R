@@ -11,7 +11,8 @@ require(haplo.stats)
 library(magic)
 library(gdata)
 library(lme4)
-source("~/Documents/Research/yeast_cross/Power/RIX/genomat.utils.R")
+source("genomat.utils.R")
+source("myhaploLMM.R")
 
 #####
 ##### Variable arguments
@@ -24,9 +25,9 @@ domi <- "add" #Model for genetic dominance
 set.seed(7)
 #####
 ##### Hard coded parameters
-f <- 18 # Number of founders
+f <- 3 # Number of founders
 p <- 1/f# Equal expected allele frequencies
-r <- 1200 # Number of loci analyzed
+r <- 3 # Number of loci analyzed
 ntrials <- 1 # Number of simulation trials
 ksites <- 1 # Number of sites per locus
 gamma <- 0.1
