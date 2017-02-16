@@ -11,6 +11,7 @@ require(haplo.stats)
 library(magic)
 library(gdata)
 library(lme4)
+library(ggplot2)
 source("genomat.utils.R")
 source("myhaploLMM.R")
 
@@ -135,3 +136,20 @@ for(N in Nind){
   
   output <- rbind(output,r_sq_data)
 }
+output <- data.table(setNames(output,c("N","Design","rsq")))
+
+pdf("../plots/RIX_LD_DECAY.pdf",width=9,height=8,pointsize =18 )
+p<- ggplot(filter(output,Design==1),aes(N,rsq,group=N)) + geom_boxplot() +theme_bw()
+p <- p + xlab("Number of RILS in the RIX") + ylab(expression(paste(r^2)))
+p + theme(axis.text = element_text(size=20),
+          axis.title= element_text(size = 22),
+          legend.title= element_text(size = 20),
+          legend.text= element_text(size = 18),
+          plot.title = element_text(size=24, hjust = 0),
+          panel.border = element_blank(), 
+          panel.grid.major = element_blank(),
+          panel.grid.minor = element_blank(), 
+          axis.line.x = element_line(colour = "black"),
+          axis.line.y = element_line(colour = "black"))
+dev.off()
+

@@ -17,28 +17,28 @@ source("myhaploLMM.R")
 #####
 ##### Variable arguments
 h <- 2 # Number of alleles
-N <-768 # Number of individuals
+N <-96 # Number of individuals
 H2 <- 0.1 # Heritability explained by the locus
-reps <-3 # Replicate samples
+reps <-10 # Replicate samples
 domi <- "add" #Model for genetic dominance
 
-set.seed(7)
+set.seed(9)
 #####
 ##### Hard coded parameters
 f <- 3 # Number of founders
 p <- 1/f# Equal expected allele frequencies
-r <- 3 # Number of loci analyzed
+r <- 10 # Number of loci analyzed
 ntrials <- 1 # Number of simulation trials
 ksites <- 1 # Number of sites per locus
-gamma <- 0.1
+gamma <- 1
 eps <- 10^(-6) # The gamma squared parameter from Burger defining the mutational variance
 #####
 output <- data.frame()
 
 #RIL genotypes as founder haplotype number N by r matrix
 #We have A's and Alphas
-HAP_RIL_A = as.matrix(ldply(1:N,.fun=function(x) sample(seq(1,f),size=r,prob=rep(p,f),replace=TRUE)))
-HAP_RIL_ALPHA =  as.matrix(ldply(1:N,.fun=function(x) sample(seq(1,f),size=r,prob=rep(p,f),replace=TRUE)))
+HAP_RIL_A = as.matrix(plyr:::ldply(1:N,.fun=function(x) sample(seq(1,f),size=r,prob=rep(p,f),replace=TRUE)))
+HAP_RIL_ALPHA =  as.matrix(plyr:::ldply(1:N,.fun=function(x) sample(seq(1,f),size=r,prob=rep(p,f),replace=TRUE)))
 #Model matrix N by nalpha
 HAP_RIL_A = t( ((1:r -1)*(f))+ t(HAP_RIL_A))
 HAP_RIL_ALPHA = t(((1:r -1)*(f))+ t(HAP_RIL_ALPHA))
@@ -177,12 +177,14 @@ G_RIX_2 <- G_POLY_RIX_2 + G_FOCUS_RIX_2
 VE_1 <- var(G_RIX_1)*(1-H2_trait)/H2_trait
 VE_2 <- var(G_RIX_2)*(1-H2_trait)/H2_trait
 
-E_1 <- sapply(rep(0,reps),function(x)rnorm(length(G_RIX_1),0,sqrt(VE_1)))
-E_2 <- sapply(rep(0,reps),function(x)rnorm(length(G_RIX_2),0,sqrt(VE_2)))
+E_1 <- rnorm(length(G_RIX_1)*reps,0,sqrt(VE_1)) #sapply(rep(0,reps),function(x)rnorm(length(G_RIX_1),0,sqrt(VE_1)))
+E_2 <- rnorm(length(G_RIX_2)*reps,0,sqrt(VE_2))#sapply(rep(0,reps),function(x)rnorm(length(G_RIX_2),0,sqrt(VE_2)))
 
-P_RIX_1 <- G_RIX_1 + rowMeans(E_1)
-P_RIX_2 <- G_RIX_2 + rowMeans(E_2)
+P_RIX_1 <- rep(G_RIX_1,reps) + E_1#rowMeans(E_1)
+P_RIX_2 <- rep(G_RIX_2,reps) + E_2
 
+CROSS_1 <- rep(1:length(G_RIX_1),reps)
+CROSS_2 <- rep(1:length(G_RIX_2),reps)
 
 
 #Fit LMM
@@ -190,7 +192,6 @@ P_RIX_2 <- G_RIX_2 + rowMeans(E_2)
 # X is the genotype matrix and a is a vector of fixed genotype effects
 # Z_ALPHA is the ALPHA RIL type and ALPHA is the randome effect of the ALPHA RIL
 # Z_A is the A RIL type and A is the random effect of the A RIL
-library(lme4)
 
 #one choice is to model each parent as a dummy variable
 #MODEL_MAT_1 <- data.frame(P_RIX_1,GENO_RIX_1[,(f*(focus-1)+1):(f*focus)],Z_RIX_1$A,Z_RIX_1$ALPHA)
@@ -198,42 +199,52 @@ library(lme4)
 
 
 #the other approach is to model the A and Alpha as the two random effects with a lot of levels
-MODEL_MAT_1 <- data.frame(P_RIX_1,GENO_RIX_1[,(f*(focus-1)+1):(f*focus)],RIX_1)
-MODEL_MAT_2 <- data.frame(P_RIX_2,GENO_RIX_2[,(f*(focus-1)+1):(f*focus)],RIX_2)
+
+
+MODEL_MAT_1 <- data.frame(P_RIX_1,CROSS_1,do.call("rbind", rep(list(data.frame(GENO_RIX_1[,(f*(focus-1)+1):(f*focus)],RIX_1)), reps)))
+MODEL_MAT_2 <- data.frame(P_RIX_2,CROSS_2,do.call("rbind", rep(list(data.frame(GENO_RIX_2[,(f*(focus-1)+1):(f*focus)],RIX_2)), reps)))
 
 haplofreq_focus_1 <- colSums(GENO_RIX_1[,(f*(focus-1)+1):(f*focus)])/(2*nrow(GENO_RIX_1))
 haplofreq_focus_2 <- colSums(GENO_RIX_1[,(f*(focus-1)+1):(f*focus)])/(2*nrow(GENO_RIX_2))
 
-colnames(MODEL_MAT_1) <- c("Y",sapply(seq(1:(ncol(MODEL_MAT_1)-1)),function(x) paste("X",x,sep="")))
-colnames(MODEL_MAT_2) <- c("Y",sapply(seq(1:(ncol(MODEL_MAT_2)-1)),function(x) paste("X",x,sep="")))
+colnames(MODEL_MAT_1) <- c("Y","Cross",sapply(seq(1:(ncol(MODEL_MAT_1)-4)),function(x) paste("X",x,sep="")),"MAT_A","MAT_ALPHA")
+colnames(MODEL_MAT_2) <- c("Y","Cross",sapply(seq(1:(ncol(MODEL_MAT_2)-4)),function(x) paste("X",x,sep="")),"MAT_A","MAT_ALPHA")
 
 names_1 <- colnames(MODEL_MAT_1) 
 names_2 <- colnames(MODEL_MAT_2)
 
-LMM_formula_1 <- as.formula(paste(names_1[1]," ~ ",
-                              paste(c(names_1[3:(f+1)],
-                                      sapply(names_1[(f+2):length(names_1)],
+LMM_formula_1 <- as.formula(paste(names_1[1]," ~ 0 + ",
+                              paste(c(names_1[3:(f+2)],
+                                      sapply(names_1[(f+3):length(names_1)],
                                              function(x) paste("(1 | ",x,")",sep=""))),
-                                      collapse=" + "),sep=""))
-LMM_null_formula_1 <- as.formula(paste(names_1[1]," ~ ",
-                                  paste(sapply(names_1[(f+2):length(names_1)],
-                                                 function(x) paste("(1 | ",x,")",sep="")),
-                                        collapse=" + "),sep=""))
+                                      collapse=" + ")," + (1 | Cross)",sep=""))
+LMM_null_formula_1 <- as.formula( paste(names_1[1]," ~ 0 + ",
+                                        paste(sapply(names_1[(f+3):length(names_1)],function(x) paste("(1 | ",x,")",sep="")),
+                                              collapse=" + ") ," + (1 | Cross)",sep=""))
 
 simple_formula <- as.formula(paste(names_1[1]," ~ ",
                                    paste(names_1[3:(f+1)],
                                          collapse=" + "),sep=""))
 
 
-LMM_1 <- lmer(formula=LMM_formula_1,data=MODEL_MAT_1)
-LMM_1_null <- lmer(formula=LMM_null_formula_1,data=MODEL_MAT_1)
+LMM_1 <- lmer(formula=LMM_formula_1,data=MODEL_MAT_1,REML=TRUE)
+LMM_1_null <- lmer(formula=LMM_null_formula_1,data=MODEL_MAT_1,REML=TRUE)
+
+
+
+
+##################
+
 
 LOD <- (-2*(logLik(LMM_1_null) - logLik(LMM_1)))/(2*log(10))
 
+
+#######
 GLM_1 <- glm(formula=simple_formula,data=MODEL_MAT_1,family="gaussian")
 GLM_NULL_1  <-glm(formula="Y ~ 1",data=MODEL_MAT_1,family="gaussian")
-source("~/Documents/Research/yeast_cross/Power/RIX/myhaploLMM.R")
-source("~/Documents/Research/yeast_cross/Power/RIX/myhaplopen.R")
+source("myhaploLMM.R")
+source("test_casanova.R")
+#source("~/Documents/Research/yeast_cross/Power/RIX/myhaplopen.R")
 
 LMM_1.summ <- summary(LMM_1)
 LMM_1.summ$fitted.values <- fitted(LMM_1)
@@ -243,9 +254,41 @@ hapdata <- cbind(HAP_RIL_A[,focus],HAP_RIL_ALPHA[,focus]) - ((focus - 1) * (f))
 lambdas <- seq(0.01,5.01,0.1)
 eps=1e-6
 
-CAS_LMM_1 <- my.haplo.pen.lmm(LMM_1.summ, data=MODEL_MAT_1[,c(1,3:(f+1))] ,
+CAS <- CasANOVA(LMM_1.summ,data=MODEL_MAT_1[,c(1,3:(f+2))],lambdas = lambdas, eps = eps)
+
+V_reml = function(Z,sigma_reml){
+  V <- matrix(0,nrow(Z),nrow(Z))
+  for ( i in 1:ncol(Z)){
+
+    V <- V + tcrossprod(Z[,i])*(sigma_reml[i]^2)
+  }
+  return(V)
+}
+
+
+Z = cbind(rep(1,nrow(MODEL_MAT_1)),MODEL_MAT_1[,c(2,6,7)])
+est = VarCorr(LMM_1)
+re_names <- attributes(est)$names
+sigma_0 <- sigma(LMM_1)
+sigma_i <- rep(0,length(re_names))
+sigma_reml <- c( sigma_0,sapply(re_names,function(x) attributes(est[[x]])$stddev))
+V_reml_est <- V_reml(Z,sigma_reml)
+Vinv <- chol2inv(V_reml_est[1:1000,1:1000])
+
+tm <- NULL
+Ns <- c(1000,2000,3000,4000,5000,10000)
+for ( n in Ns ){
+  tm<- rbind(tm,system.time(chol2inv(V_reml_est[1:n,1:n])))
+}
+plot(Ns,tm[,1])
+
+##########
+
+CAS_LMM_1 <- my.haplo.pen.lmm(LMM_1.summ, data=MODEL_MAT_1[,c(1,3:(f+2))] ,
                               haplofreq=haplofreq_focus_1, hapdata=hapdata,hap.base = 1,
                               lambdas = lambdas, eps = eps)
+
+ #%*%t(Z[,1])
 
 CAS_GLM <- my.haplo.pen.glm.1(formula = as.formula(Y~.), data=MODEL_MAT_1[,c(1,3:(f+1))], family = "gaussian" , 
                               haplofreq = haplofreq_focus_1, hap.base = 1, hapdata = hapdata,
