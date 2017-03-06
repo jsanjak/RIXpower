@@ -1,6 +1,6 @@
 ##### haploDMR.R simulates QTL mapping and haplotype effect estimation in a multiparental cross
 ##### and uses DMR method to collapse levels
-# last edited: 02/07/2017 
+# last edited: 02/07/2017
 # Jaleal Sanjak
 #####
 #####
@@ -12,8 +12,7 @@ library(magic)
 library(gdata)
 library(lme4)
 source("genomat.utils.R")
-source("myhaploLMM.R")
-
+source("casanova.R")
 #####
 ##### Variable arguments
 h <- 2 # Number of alleles
@@ -32,6 +31,10 @@ ntrials <- 1 # Number of simulation trials
 ksites <- 1 # Number of sites per locus
 gamma <- 1
 eps <- 10^(-6) # The gamma squared parameter from Burger defining the mutational variance
+lambda_pt <- c(0.01,5.01)
+
+
+
 #####
 output <- data.frame()
 
@@ -48,10 +51,10 @@ GENO_RIL_A = matrix(0,nrow=N,ncol=r*f)
 GENO_RIL_ALPHA = matrix(0,nrow=N,ncol=r*f)
 
 for (i in 1:N ){
-  
+
   GENO_RIL_A[i,HAP_RIL_A[i,]] = GENO_RIL_A[i,HAP_RIL_A[i,]] + 1
   GENO_RIL_ALPHA[i,HAP_RIL_ALPHA[i,]] = GENO_RIL_ALPHA[i,HAP_RIL_ALPHA[i,]] + 1
-  
+
 }
 sum(rowSums(GENO_RIL_A)==r)==N
 sum(rowSums(GENO_RIL_ALPHA)==r)==N
@@ -71,10 +74,10 @@ Design_2 <- base_2
 for ( i in 1:(N/nrow(base_1)-1)){
   if(i<= (N/nrow(base_2)-1)) {
     Design_2 <- adiag(Design_2,base_2)
-    
+
   }
   Design_1 <- adiag(Design_1,base_1)
-  
+
 }
 
 #RIX genotypes in condensed format
@@ -154,14 +157,14 @@ poly_VG_2 <-var(G_FOCUS_RIX_2)*(H2_trait +  (H2_trait*(1-H2_focus)/(H2_focus)) -
 
 
 get_poly_effects = function(causal,f,poly_VG){
-  
+
   if(causal==1) {
     effects <- rnorm(f,0,sqrt(poly_VG))
   } else {
-    effects <- rep(0,f) 
+    effects <- rep(0,f)
   }
   return(effects)
-  
+
 }
 
 
@@ -210,7 +213,7 @@ haplofreq_focus_2 <- colSums(GENO_RIX_1[,(f*(focus-1)+1):(f*focus)])/(2*nrow(GEN
 colnames(MODEL_MAT_1) <- c("Y","Cross",sapply(seq(1:(ncol(MODEL_MAT_1)-4)),function(x) paste("X",x,sep="")),"MAT_A","MAT_ALPHA")
 colnames(MODEL_MAT_2) <- c("Y","Cross",sapply(seq(1:(ncol(MODEL_MAT_2)-4)),function(x) paste("X",x,sep="")),"MAT_A","MAT_ALPHA")
 
-names_1 <- colnames(MODEL_MAT_1) 
+names_1 <- colnames(MODEL_MAT_1)
 names_2 <- colnames(MODEL_MAT_2)
 
 LMM_formula_1 <- as.formula(paste(names_1[1]," ~ 0 + ",
@@ -218,13 +221,10 @@ LMM_formula_1 <- as.formula(paste(names_1[1]," ~ 0 + ",
                                       sapply(names_1[(f+3):length(names_1)],
                                              function(x) paste("(1 | ",x,")",sep=""))),
                                       collapse=" + ")," + (1 | Cross)",sep=""))
+
 LMM_null_formula_1 <- as.formula( paste(names_1[1]," ~ 0 + ",
                                         paste(sapply(names_1[(f+3):length(names_1)],function(x) paste("(1 | ",x,")",sep="")),
                                               collapse=" + ") ," + (1 | Cross)",sep=""))
-
-simple_formula <- as.formula(paste(names_1[1]," ~ ",
-                                   paste(names_1[3:(f+1)],
-                                         collapse=" + "),sep=""))
 
 
 LMM_1 <- lmer(formula=LMM_formula_1,data=MODEL_MAT_1,REML=TRUE)
@@ -232,84 +232,113 @@ LMM_1_null <- lmer(formula=LMM_null_formula_1,data=MODEL_MAT_1,REML=TRUE)
 
 
 
-
 ##################
-
 
 LOD <- (-2*(logLik(LMM_1_null) - logLik(LMM_1)))/(2*log(10))
 
+#####
+x <- as.matrix(MODEL_MAT_1[,3:(3+f-1)]) 
+y <- as.matrix(MODEL_MAT_1[,1])
+
+LAMBDA  <- getME(LMM_1_null,"Lambda")
+sigma_sq <- getME(LMM_1_null,"sigma")^2
+Z <- t(do.call(Matrix::rBind,getME(LMM_1_null,"Ztlist")))
+bigSigma <- Z%*%tcrossprod(LAMBDA)%*%t(Z)
+ZId <- sparseMatrix(1:nrow(Z),1:nrow(Z),x=rep(1,nrow(Z)))
+beta.start <- fixef(LMM_1)
+
+r <- eigen(bigSigma)
+U <- r$vectors
+d <- r$values
+
+DIinv <- diag(1/sqrt(d+1))
+
+UTy <- crossprod(U,y)
+UTx <- crossprod(U,x)
+
+y_tilde <- DIinv%*%UTy
+x_tilde <- DIinv%*%UTx
+
+
+lambdas <- seq(lambda_pt[1],lambda_pt[2],0.1*sigma_sq)/sigma_sq
+CAS_LMM_1 <- CasANOVA(y_tilde,x_tilde,beta.start,sigma_sq,lambdas = lambdas, eps = eps)
+
+beta.t <- round(CAS_LMM_1$coefficients,-log10(eps)-1)
+alleles <- length(unique(beta.t))
+lambdafit <- CAS_LMM_1$lambda/sigma_sq
+
 
 #######
-GLM_1 <- glm(formula=simple_formula,data=MODEL_MAT_1,family="gaussian")
-GLM_NULL_1  <-glm(formula="Y ~ 1",data=MODEL_MAT_1,family="gaussian")
-source("myhaploLMM.R")
-source("test_casanova.R")
+#GLM_1 <- glm(formula=simple_formula,data=MODEL_MAT_1,family="gaussian")
+#GLM_NULL_1  <-glm(formula="Y ~ 1",data=MODEL_MAT_1,family="gaussian")
+#source("../myhaploLMM.R")
+#source("../test_casanova.R")
 #source("~/Documents/Research/yeast_cross/Power/RIX/myhaplopen.R")
 
-LMM_1.summ <- summary(LMM_1)
-LMM_1.summ$fitted.values <- fitted(LMM_1)
-LMM_1.summ$family <- "gaussian"
-LMM_1.summ$y <- MODEL_MAT_1$Y
-hapdata <- cbind(HAP_RIL_A[,focus],HAP_RIL_ALPHA[,focus]) - ((focus - 1) * (f))
-lambdas <- seq(0.01,5.01,0.1)
-eps=1e-6
+#LMM_1.summ <- summary(LMM_1)
+#LMM_1.summ$fitted.values <- fitted(LMM_1)
+#LMM_1.summ$family <- "gaussian"
+#LMM_1.summ$y <- MODEL_MAT_1$Y
+#hapdata <- cbind(HAP_RIL_A[,focus],HAP_RIL_ALPHA[,focus]) - ((focus - 1) * (f))
+#lambdas <- seq(0.01,5.01,0.1)
+#eps=1e-6
 
-CAS <- CasANOVA(LMM_1.summ,data=MODEL_MAT_1[,c(1,3:(f+2))],lambdas = lambdas, eps = eps)
+#CAS <- CasANOVA(LMM_1.summ,data=MODEL_MAT_1[,c(1,3:(f+2))],lambdas = lambdas, eps = eps)
 
-V_reml = function(Z,sigma_reml){
-  V <- matrix(0,nrow(Z),nrow(Z))
-  for ( i in 1:ncol(Z)){
+#V_reml = function(Z,sigma_reml){
+#  V <- matrix(0,nrow(Z),nrow(Z))
+#  for ( i in 1:ncol(Z)){
 
-    V <- V + tcrossprod(Z[,i])*(sigma_reml[i]^2)
-  }
-  return(V)
-}
+#    V <- V + tcrossprod(Z[,i])*(sigma_reml[i]^2)
+#  }
+#  return(V)
+#}
 
 
-Z = cbind(rep(1,nrow(MODEL_MAT_1)),MODEL_MAT_1[,c(2,6,7)])
-est = VarCorr(LMM_1)
-re_names <- attributes(est)$names
-sigma_0 <- sigma(LMM_1)
-sigma_i <- rep(0,length(re_names))
-sigma_reml <- c( sigma_0,sapply(re_names,function(x) attributes(est[[x]])$stddev))
-V_reml_est <- V_reml(Z,sigma_reml)
-Vinv <- chol2inv(V_reml_est[1:1000,1:1000])
+#Z = cbind(rep(1,nrow(MODEL_MAT_1)),MODEL_MAT_1[,c(2,6,7)])
+#est = VarCorr(LMM_1)
+#re_names <- attributes(est)$names
+#sigma_0 <- sigma(LMM_1)
+#sigma_i <- rep(0,length(re_names))
+#sigma_reml <- c( sigma_0,sapply(re_names,function(x) attributes(est[[x]])$stddev))
+#V_reml_est <- V_reml(Z,sigma_reml)
+#Vinv <- chol2inv(V_reml_est[1:1000,1:1000])
 
-tm <- NULL
-Ns <- c(1000,2000,3000,4000,5000,10000)
-for ( n in Ns ){
-  tm<- rbind(tm,system.time(chol2inv(V_reml_est[1:n,1:n])))
-}
-plot(Ns,tm[,1])
+#tm <- NULL
+#Ns <- c(1000,2000,3000,4000,5000,10000)
+#for ( n in Ns ){
+#  tm<- rbind(tm,system.time(chol2inv(V_reml_est[1:n,1:n])))
+#}
+#plot(Ns,tm[,1])
 
 ##########
 
-CAS_LMM_1 <- my.haplo.pen.lmm(LMM_1.summ, data=MODEL_MAT_1[,c(1,3:(f+2))] ,
-                              haplofreq=haplofreq_focus_1, hapdata=hapdata,hap.base = 1,
-                              lambdas = lambdas, eps = eps)
+#CAS_LMM_1 <- my.haplo.pen.lmm(LMM_1.summ, data=MODEL_MAT_1[,c(1,3:(f+2))] ,
+#                              haplofreq=haplofreq_focus_1, hapdata=hapdata,hap.base = 1,
+#                              lambdas = lambdas, eps = eps)
 
  #%*%t(Z[,1])
 
-CAS_GLM <- my.haplo.pen.glm.1(formula = as.formula(Y~.), data=MODEL_MAT_1[,c(1,3:(f+1))], family = "gaussian" , 
-                              haplofreq = haplofreq_focus_1, hap.base = 1, hapdata = hapdata,
-                              lambdas = lambdas, eps = eps)
+#CAS_GLM <- my.haplo.pen.glm.1(formula = as.formula(Y~.), data=MODEL_MAT_1[,c(1,3:(f+1))], family = "gaussian" ,
+#                              haplofreq = haplofreq_focus_1, hap.base = 1, hapdata = hapdata,
+#                              lambdas = lambdas, eps = eps)
 
 
-beta.t <- round(CAS_LMM_1$coefficients[-1],max(round(-log10(CAS_LMM_1$init.fit$coefficients[,2]))))
-alleles <- 1+ length(unique(beta.t[beta.t!=0])) #round(beta[-1],-log10(eps)-1)))
+#beta.t <- round(CAS_LMM_1$coefficients[-1],max(round(-log10(CAS_LMM_1$init.fit$coefficients[,2]))))
+#alleles <- 1+ length(unique(beta.t[beta.t!=0])) #round(beta[-1],-log10(eps)-1)))
 
-par(mfrow=c(1,2))
-plot(LMM_1.summ$coefficients[,1],col="red",pch=19,main="LMM")
-points(CAS_LMM_1$coefficients,col="black",pch=19)
+#par(mfrow=c(1,2))
+#plot(LMM_1.summ$coefficients[,1],col="red",pch=19,main="LMM")
+#points(CAS_LMM_1$coefficients,col="black",pch=19)
 
-plot(GLM_1$coefficients,col="red",pch=19,main="GLM")
-points(CAS_GLM$coefficients,col="black",pch=19)
+#plot(GLM_1$coefficients,col="red",pch=19,main="GLM")
+#points(CAS_GLM$coefficients,col="black",pch=19)
 
 
 
-P_dat_null <- prod(dnorm(MODEL_MAT_1$Y, mean = mean(MODEL_MAT_1$Y), sd = sqrt(var(MODEL_MAT_1$Y))))
-P_dat_LMM <- prod(haplo.stats:::dglm.fit(CAS_LMM_1))
-LOD <- log10(P_dat_null/P_dat_LMM)
+#P_dat_null <- prod(dnorm(MODEL_MAT_1$Y, mean = mean(MODEL_MAT_1$Y), sd = sqrt(var(MODEL_MAT_1$Y))))
+#P_dat_LMM <- prod(haplo.stats:::dglm.fit(CAS_LMM_1))
+#LOD <- log10(P_dat_null/P_dat_LMM)
 #TODO
 #Impute the RIX dominance matrices for each locus
 
