@@ -8,7 +8,7 @@
 #####################################################################
 
 
-CasANOVA=function(y,X,beta.start, sigma_sq, lambdas = seq(0.1,5,0.1), eps = 10^{-6}){
+CasANOVA=function(y,X,beta.start, sigma_sq, lambdas = seq(0.1,5,0.1), eps = 10^{-6}, maxiter=100){
 
   #simple model 4 levels, two effects
   require(MASS)
@@ -84,12 +84,15 @@ CasANOVA=function(y,X,beta.start, sigma_sq, lambdas = seq(0.1,5,0.1), eps = 10^{
 
   full.mat = NULL
   beta.t = beta.mle
-
+  XtX <- crossprod(X)
   for(lambda in lambdas)
   {
+    print(lambda)
     beta.eps = rep(1,length(beta.wt))
-    while(max(beta.eps)>eps)
+    counter=0
+    while(max(beta.eps)>eps & counter<=maxiter)
     {
+      #print(beta.eps)
       beta.tilde = beta.t#[-1]
       abs.tilde = abs(beta.tilde)
       abs.diff = as.vector(abs(dm %*% beta.tilde))
@@ -98,9 +101,11 @@ CasANOVA=function(y,X,beta.start, sigma_sq, lambdas = seq(0.1,5,0.1), eps = 10^{
 
       if (length(abs.diff)==1) {quad.mat.2 = 0}
       penalty.mat = lambda*(quad.mat.1 + t(dm) %*% quad.mat.2 %*% dm)
-      Sigma.Mat = t(X) %*% X + penalty.mat
-      beta.t = solve(Sigma.Mat) %*% t(X) %*% y
+      Sigma.Mat = XtX +  penalty.mat
+      beta.t = solve(Sigma.Mat,crossprod(X,y))
       beta.eps = abs(beta.tilde-beta.t)/(abs(beta.tilde)+eps)
+      #print(beta.t)
+      counter = counter + 1
     }
     df = sum((unique(abs(round(beta.t,6)))!=0))
     bic = N*log(sum((y-X %*% beta.t)^2))+log(N)*df #this maybe should be mean(RSS), but it doesn't matter for choosing the smallest BIC
